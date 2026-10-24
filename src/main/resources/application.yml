@@ -1,0 +1,67 @@
+server:
+  port: 8080
+  error:
+    include-stacktrace: never
+    include-message: never
+
+spring:
+  application:
+    name: vehicle-telemetry
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/telemetry}
+    username: ${SPRING_DATASOURCE_USERNAME:telemetry}
+    password: ${SPRING_DATASOURCE_PASSWORD:telemetry}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate.jdbc.time_zone: UTC
+      hibernate.globally_quoted_identifiers: true
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: vehicle-telemetry-group
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      max-poll-records: 1
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: com.vehicle.telemetry.dto
+        spring.json.value.default.type: com.vehicle.telemetry.dto.TelemetryEvent
+        spring.json.use.type.headers: false
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        spring.json.add.type.headers: false
+    listener:
+      ack-mode: manual_immediate
+
+vehicle:
+  kafka:
+    topic: vehicle-telemetry
+  rules:
+    speed-threshold: 120
+    temperature-threshold: 100
+  simulator:
+    enabled: false
+    count: 4
+  security:
+    user:
+      username: ${APP_USER_USERNAME:user}
+      password: ${APP_USER_PASSWORD:user123}
+    admin:
+      username: ${APP_ADMIN_USERNAME:admin}
+      password: ${APP_ADMIN_PASSWORD:admin123}
+
+jwt:
+  secret: ${JWT_SECRET:vehicle-telemetry-jwt-secret-key-change-me-32b}
+  expiration-ms: ${JWT_EXPIRATION_MS:3600000}
+
+logging:
+  level:
+    com.vehicle.telemetry: INFO
+    org.apache.kafka: WARN

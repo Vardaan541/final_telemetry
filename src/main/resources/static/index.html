@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vehicle Telemetry</title>
+  <style>
+    :root { color-scheme: light; }
+    body { margin: 0; font-family: Georgia, "Times New Roman", serif; background: #f4f1ea; color: #1c1a16; }
+    main { max-width: 880px; margin: 0 auto; padding: 40px 20px 64px; }
+    h1 { font-size: 32px; font-weight: 600; margin: 0 0 8px; }
+    p { line-height: 1.5; }
+    .muted { color: #5c564c; }
+    section { background: #fffdf8; border: 1px solid #e4dccf; border-radius: 12px; padding: 20px; margin-top: 20px; }
+    label { display: block; font-size: 14px; margin-bottom: 12px; }
+    input { width: 100%; box-sizing: border-box; margin-top: 4px; padding: 8px 10px; font: 16px ui-monospace, monospace; border: 1px solid #cfc6b8; border-radius: 8px; background: #fff; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    button { font: 16px Georgia, serif; background: #1c1a16; color: #fff; border: 0; border-radius: 8px; padding: 10px 16px; cursor: pointer; }
+    button:disabled { opacity: 0.6; cursor: wait; }
+    #status { min-height: 1.4em; margin-top: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #eee6da; vertical-align: top; }
+    th { font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: #5c564c; }
+    .empty { color: #5c564c; }
+    @media (max-width: 640px) { .row { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Vehicle telemetry</h1>
+  <p class="muted">Readings are published to Kafka, checked for speeding and overheating, then stored. Alerts appear below a moment after you send a reading.</p>
+
+  <section>
+    <h2>Send a reading</h2>
+    <form id="form">
+      <div class="row">
+        <label>Vehicle
+          <input id="vehicleId" value="VH-001" required>
+        </label>
+        <label>Speed (km/h)
+          <input id="speed" type="number" step="0.1" min="0" value="130" required>
+        </label>
+      </div>
+      <label>Engine temperature (C)
+        <input id="temperature" type="number" step="0.1" value="90" required>
+      </label>
+      <button id="send" type="submit">Send</button>
+      <p id="status" class="muted"></p>
+    </form>
+  </section>
+
+  <section>
+    <h2>Alerts</h2>
+    <div id="alerts"><p class="empty">Loading…</p></div>
+  </section>
+</main>
+<script>
+  const status = document.getElementById("status");
+  const send = document.getElementById("send");
+
+  document.getElementById("form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const body = {
+      eventId: "evt-" + Date.now(),
+      vehicleId: document.getElementById("vehicleId").value.trim(),
+      timestamp: new Date().toISOString(),
+      speed: Number(document.getElementById("speed").value),
+      engineTemperature: Number(document.getElementById("temperature").value)
+    };
+    send.disabled = true;
+    status.textContent = "Publishing…";
+    try {
+      const response = await fetch("/api/telemetry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        status.textContent = payload.message || "Request failed";
+        return;
+      }
+      status.textContent = body.eventId + " published. The alert list refreshes in a moment.";
+      setTimeout(async () => {
+        await loadAlerts();
+        status.textContent = body.eventId + " published.";
+      }, 1500);
+    } catch (error) {
+      status.textContent = "Could not reach the server.";
+    } finally {
+      send.disabled = false;
+    }
+  });
+
+  async function loadAlerts() {
+    const box = document.getElementById("alerts");
+    try {
+      const response = await fetch("/api/alerts?page=0&size=20");
+      const page = await response.json();
+      const rows = page.content || [];
+      if (!rows.length) {
+        box.innerHTML = "<p class=\"empty\">No alerts yet. A speed above 120 or a temperature above 100 creates one.</p>";
+        return;
+      }
+      box.innerHTML = "<table><thead><tr><th>Vehicle</th><th>Type</th><th>Message</th><th>Time</th></tr></thead><tbody>"
+        + rows.map((alert) => "<tr><td>" + escape(alert.vehicleId) + "</td><td>" + escape(alert.alertType) + "</td><td>" + escape(alert.message) + "</td><td>" + escape(alert.timestamp) + "</td></tr>").join("")
+        + "</tbody></table>";
+    } catch (error) {
+      box.innerHTML = "<p class=\"empty\">Could not load alerts.</p>";
+    }
+  }
+
+  function escape(value) {
+    return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
+    }[char]));
+  }
+
+  loadAlerts();
+</script>
+</body>
+</html>

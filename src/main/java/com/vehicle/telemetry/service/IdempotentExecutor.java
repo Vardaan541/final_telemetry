@@ -28,16 +28,19 @@ public class IdempotentExecutor {
      * PostgreSQL aborts the current transaction on a unique violation, so each write
      * is isolated. Only SQL state 23505 is treated as a duplicate; every other failure
      * is rethrown so the Kafka offset stays uncommitted.
+     *
+     * @return false when the write was rejected as a duplicate
      */
-    public void run(Runnable action, String duplicateMessage) {
+    public boolean run(Runnable action, String duplicateMessage) {
         TransactionTemplate template = new TransactionTemplate(transactionManager);
         template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         try {
             template.executeWithoutResult(status -> action.run());
+            return true;
         } catch (RuntimeException exception) {
             if (isUniqueViolation(exception)) {
                 log.info(duplicateMessage);
-                return;
+                return false;
             }
             throw exception;
         }

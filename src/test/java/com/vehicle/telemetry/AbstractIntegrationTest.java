@@ -38,6 +38,7 @@ public abstract class AbstractIntegrationTest {
         registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
         registry.add("spring.kafka.consumer.properties.session.timeout.ms", () -> "10000");
         registry.add("spring.kafka.consumer.properties.heartbeat.interval.ms", () -> "2000");
+        registry.add("vehicle.simulator.enabled", () -> "false");
     }
 
     @Autowired

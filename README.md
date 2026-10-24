@@ -1,11 +1,13 @@
 # Real-Time Vehicle Telemetry and Fault-Tolerant Event Processing Engine
 
-Backend service that accepts simulated vehicle telemetry, publishes each event to Apache Kafka, and lets a consumer apply configurable speeding and engine-overheating rules. Telemetry and alerts are stored in PostgreSQL. Duplicate Kafka deliveries do not create duplicate alerts. REST access is protected with JWT and role checks.
+Backend service that accepts vehicle telemetry, publishes each event to Apache Kafka, and lets a consumer apply configurable speeding and engine-overheating rules. Telemetry and alerts are stored in PostgreSQL. Duplicate Kafka deliveries do not create duplicate alerts. REST access is protected with JWT and role checks.
+
+While the app is running it publishes a continuous live feed. Each new alert is pushed to open browsers immediately. The dashboard is at `/`. The same stack can be launched on EC2 with `infra/ec2/deploy.sh`.
 
 ## Architecture
 
 ```
-Client
+Live simulator or client
   |  POST /api/telemetry
   v
 Spring Boot REST API
@@ -26,8 +28,9 @@ Rule processing
   v
 PostgreSQL
   |
-  v
-GET /api/alerts
+  +--> GET /api/alerts
+  |
+  +--> GET /api/alerts/stream  -->  live dashboard at /
 ```
 
 `POST /api/telemetry` validates the payload and publishes it. It does not create alerts. The Kafka consumer is the only component that evaluates rules and writes alerts. PostgreSQL is the source of truth.
@@ -35,11 +38,13 @@ GET /api/alerts
 ## Tech stack
 
 - Java 17
-- Spring Boot
-- Apache Kafka (Spring Kafka)
-- PostgreSQL
-- Docker
-- Spring Security and JWT
+- Spring Boot 3.4.5
+- Apache Kafka 3.8.1 in KRaft mode (Spring Kafka)
+- PostgreSQL 16
+- Docker Compose
+- Spring Security and JWT (jjwt 0.12.6)
+- Server-Sent Events for the live dashboard at `/`
+- Terraform 1.5+ and the AWS provider on Amazon EC2 (Amazon Linux 2023)
 - JUnit 5
 - Testcontainers
 
@@ -48,7 +53,7 @@ GET /api/alerts
 ```
 src/main/java/com/vehicle/telemetry/
   controller/     REST endpoints
-  service/        ingestion, processing, alerts, login
+  service/        ingestion, processing, alerts, login, live stream
   repository/     Spring Data JPA
   entity/         telemetry and alert tables
   dto/            request and response objects
@@ -57,7 +62,10 @@ src/main/java/com/vehicle/telemetry/
   config/         Kafka, rule, JWT, and user settings
   exception/      HTTP error mapping
   rules/          TelemetryRule, SpeedingRule, OverheatingRule
-  simulator/      optional in-process telemetry generator
+  simulator/      in-process live telemetry generator
+src/main/resources/static/
+  index.html      live alert dashboard
+infra/ec2/        Terraform and deploy script for one EC2 instance
 ```
 
 ## Kafka flow
@@ -204,6 +212,14 @@ Query parameters:
 
 Results are ordered by timestamp, newest first.
 
+### Live alert stream
+
+`GET /api/alerts/stream` stays open and pushes each new alert as a server-sent event named `alert`. The event data is the same JSON object returned inside `content` by `GET /api/alerts`. A repeated Kafka delivery does not push a second event. The dashboard at `/` uses this stream.
+
+```bash
+curl -N http://localhost:8080/api/alerts/stream
+```
+
 ## Authentication
 
 Passwords from configuration are hashed with Spring Security's `BCryptPasswordEncoder` when the application starts. Users are held in memory. There is no external identity provider.
@@ -235,15 +251,13 @@ The host application uses `localhost:5432` and `localhost:9092`.
 mvn spring-boot:run
 ```
 
-The API listens on port `8080`.
+The API listens on port `8080`. Open `http://localhost:8080/` to watch alerts arrive.
 
-Generate sample normal and abnormal events through the same application:
+The live feed is on by default. It publishes one reading every 2 seconds and cycles through normal speed, speeding, overheating, and both violations for vehicles `VH-001`, `VH-002`, and `VH-003`. `vehicle.simulator.count` stops the feed after that many readings. `0` keeps it running. Turn it off with:
 
 ```bash
-mvn spring-boot:run -Dspring-boot.run.arguments=--vehicle.simulator.enabled=true
+mvn spring-boot:run -Dspring-boot.run.arguments=--vehicle.simulator.enabled=false
 ```
-
-`vehicle.simulator.count` controls how many events are published. The generator cycles through normal speed, speeding, overheating, and both violations.
 
 ## Running tests
 
@@ -284,34 +298,20 @@ Useful variables for the `app` service:
 
 ## AWS EC2 deployment
 
-This service is a single Docker Compose stack. It does not use Kubernetes or another orchestrator.
+This service is a single Docker Compose stack. It does not use Kubernetes or another orchestrator. `infra/ec2` creates one Amazon Linux 2023 instance in the default VPC, opens ports `22` and `8080`, installs Docker, copies this project, and starts the live feed.
 
-1. Launch an Amazon Linux or Ubuntu EC2 instance with Docker and the Docker Compose plugin installed.
-2. Open security-group port `22` for administration and port `8080` for the API. Leave PostgreSQL `5432` and Kafka `9092` closed to the public. They are used only on the instance.
-3. Copy this project onto the instance.
-4. Export production settings before starting the stack:
+Requirements: AWS CLI credentials, Terraform, and a default VPC in the target region. The default instance is a `t3.small` in `ap-south-1`. That size is not on the free tier.
 
 ```bash
-export JWT_SECRET="replace-with-a-random-secret-of-at-least-32-bytes"
-export APP_USER_PASSWORD="replace-user-password"
-export APP_ADMIN_PASSWORD="replace-admin-password"
+export AWS_REGION=ap-south-1
+infra/ec2/deploy.sh
 ```
 
-5. Build and run:
+The script prints the dashboard URL, `http://<public-ip>/`. PostgreSQL and Kafka stay on the instance. The security group does not open `5432` or `9092`.
 
-```bash
-docker compose up -d --build
-```
+Optional variables: `INSTANCE_TYPE`, `SSH_CIDR`, `KEY_NAME`, and `PUBLIC_KEY`. The first run writes `JWT_SECRET`, `APP_USER_PASSWORD`, and `APP_ADMIN_PASSWORD` to `/opt/vehicle-telemetry/.env` on the instance.
 
-6. Confirm the API:
-
-```bash
-curl -s http://localhost:8080/api/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"'"$APP_ADMIN_PASSWORD"'"}'
-```
-
-The Compose file publishes the API on `8080`. PostgreSQL and Kafka stay on the Compose network for the application container. To run the jar on the host instead of in Compose, start only `postgres` and `kafka`, build with `mvn package`, and run `java -jar target/vehicle-telemetry.jar`.
+To run the jar on the host instead of in Compose, start only `postgres` and `kafka`, build with `mvn package`, and run `java -jar target/vehicle-telemetry.jar`.
 
 ## Example API requests
 

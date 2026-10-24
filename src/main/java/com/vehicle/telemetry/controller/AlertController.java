@@ -4,13 +4,16 @@ import com.vehicle.telemetry.dto.AlertPageResponse;
 import com.vehicle.telemetry.entity.AlertType;
 import com.vehicle.telemetry.exception.InvalidRequestException;
 import com.vehicle.telemetry.service.AlertService;
+import com.vehicle.telemetry.service.AlertStream;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.Instant;
 
@@ -22,8 +25,16 @@ public class AlertController {
 
     private final AlertService alertService;
 
-    public AlertController(AlertService alertService) {
+    private final AlertStream alertStream;
+
+    public AlertController(AlertService alertService, AlertStream alertStream) {
         this.alertService = alertService;
+        this.alertStream = alertStream;
+    }
+
+    @GetMapping(path = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter streamAlerts() {
+        return alertStream.openStream();
     }
 
     @GetMapping

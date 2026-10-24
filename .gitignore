@@ -5,3 +5,9 @@ target/
 .project
 .settings/
 .DS_Store
+.env
+infra/ec2/.terraform/
+infra/ec2/*.tfstate
+infra/ec2/*.tfstate.*
+infra/ec2/terraform.tfvars
+infra/ec2/.ssh/

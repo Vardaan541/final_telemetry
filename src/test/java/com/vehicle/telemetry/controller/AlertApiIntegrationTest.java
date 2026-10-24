@@ -6,6 +6,8 @@ import com.vehicle.telemetry.dto.TelemetryRequest;
 import com.vehicle.telemetry.entity.AlertType;
 import com.vehicle.telemetry.repository.AlertRepository;
 import com.vehicle.telemetry.repository.TelemetryRepository;
+import com.vehicle.telemetry.dto.AlertResponse;
+import com.vehicle.telemetry.service.AlertStream;
 import com.vehicle.telemetry.service.TelemetryProcessingService;
 import com.vehicle.telemetry.dto.TelemetryEvent;
 import org.junit.jupiter.api.Test;
@@ -16,11 +18,14 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -40,6 +45,9 @@ class AlertApiIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private AlertRepository alertRepository;
+
+    @Autowired
+    private AlertStream alertStream;
 
     @Test
     void requestsDoNotRequireLogin() throws Exception {
@@ -97,6 +105,29 @@ class AlertApiIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(status().isBadRequest());
 
         assertThat(telemetryRepository.countByEventId(eventId)).isZero();
+    }
+
+    @Test
+    void dashboardIsServed() throws Exception {
+        mockMvc.perform(get("/"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("Live vehicle alerts")))
+                .andExpect(content().string(containsString("/api/alerts/stream")));
+    }
+
+    @Test
+    void newAlertIsPushedOnce() throws Exception {
+        String eventId = "evt-live-" + UUID.randomUUID();
+        CopyOnWriteArrayList<AlertResponse> received = new CopyOnWriteArrayList<>();
+        try (AutoCloseable ignored = alertStream.listen(received::add)) {
+            TelemetryEvent event = new TelemetryEvent(eventId, "VH-LIVE", Instant.parse("2026-10-24T12:30:00Z"), 140, 70);
+            processingService.process(event);
+            processingService.process(event);
+        }
+        assertThat(received).hasSize(1);
+        assertThat(received.get(0).eventId()).isEqualTo(eventId);
+        assertThat(received.get(0).alertType()).isEqualTo(AlertType.SPEEDING);
+        assertThat(alertRepository.countByEventId(eventId)).isEqualTo(1);
     }
 
     @Test

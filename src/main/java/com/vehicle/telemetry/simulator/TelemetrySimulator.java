@@ -5,15 +5,16 @@ import com.vehicle.telemetry.dto.TelemetryRequest;
 import com.vehicle.telemetry.service.TelemetryService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Component
 @ConditionalOnProperty(prefix = "vehicle.simulator", name = "enabled", havingValue = "true")
-public class TelemetrySimulator implements CommandLineRunner {
+public class TelemetrySimulator {
 
     private static final Logger log = LoggerFactory.getLogger(TelemetrySimulator.class);
 
@@ -25,33 +26,44 @@ public class TelemetrySimulator implements CommandLineRunner {
 
     private final SimulatorProperties simulatorProperties;
 
+    private final AtomicInteger published = new AtomicInteger();
+
     public TelemetrySimulator(TelemetryService telemetryService, SimulatorProperties simulatorProperties) {
         this.telemetryService = telemetryService;
         this.simulatorProperties = simulatorProperties;
     }
 
-    @Override
-    public void run(String... args) {
-        int count = simulatorProperties.getCount();
-        log.info("Generating {} simulated telemetry events", count);
-        long batch = Instant.now().toEpochMilli();
-        for (int index = 0; index < count; index++) {
-            TelemetryRequest request = sample(batch, index);
-            log.info(
-                    "simulated telemetry eventId={} vehicleId={} speed={} engineTemperature={}",
-                    request.eventId(),
-                    request.vehicleId(),
-                    request.speed(),
-                    request.engineTemperature()
-            );
-            telemetryService.ingest(request);
+    @Scheduled(
+            fixedDelayString = "${vehicle.simulator.interval-ms:2000}",
+            initialDelayString = "${vehicle.simulator.initial-delay-ms:1500}"
+    )
+    public void publishNext() {
+        int limit = simulatorProperties.getCount();
+        int index = published.get();
+        if (limit > 0 && index >= limit) {
+            return;
         }
+        TelemetryRequest request = sample(index);
+        try {
+            telemetryService.ingest(request);
+        } catch (RuntimeException exception) {
+            log.error("simulated telemetry publish failed eventId={}", request.eventId(), exception);
+            return;
+        }
+        published.incrementAndGet();
+        log.info(
+                "simulated telemetry eventId={} vehicleId={} speed={} engineTemperature={}",
+                request.eventId(),
+                request.vehicleId(),
+                request.speed(),
+                request.engineTemperature()
+        );
     }
 
-    private TelemetryRequest sample(long batch, int index) {
-        int pattern = index % SPEEDS.length;
+    private TelemetryRequest sample(int index) {
+        int pattern = Math.floorMod(index, SPEEDS.length);
         return new TelemetryRequest(
-                "sim-" + batch + "-" + index,
+                "sim-" + System.currentTimeMillis() + "-" + index,
                 "VH-" + String.format("%03d", (index % 3) + 1),
                 Instant.now(),
                 SPEEDS[pattern],

@@ -26,19 +26,26 @@ public class AlertService {
 
     private final IdempotentExecutor idempotentExecutor;
 
-    public AlertService(AlertRepository alertRepository, IdempotentExecutor idempotentExecutor) {
+    private final AlertStream alertStream;
+
+    public AlertService(
+            AlertRepository alertRepository,
+            IdempotentExecutor idempotentExecutor,
+            AlertStream alertStream
+    ) {
         this.alertRepository = alertRepository;
         this.idempotentExecutor = idempotentExecutor;
+        this.alertStream = alertStream;
     }
 
     public void createAlert(TelemetryEvent event, RuleViolation violation) {
-        idempotentExecutor.run(() -> {
-            Alert alert = new Alert();
-            alert.setEventId(event.eventId());
-            alert.setVehicleId(event.vehicleId());
-            alert.setAlertType(violation.alertType());
-            alert.setMessage(violation.message());
-            alert.setTimestamp(event.timestamp());
+        Alert alert = new Alert();
+        alert.setEventId(event.eventId());
+        alert.setVehicleId(event.vehicleId());
+        alert.setAlertType(violation.alertType());
+        alert.setMessage(violation.message());
+        alert.setTimestamp(event.timestamp());
+        boolean created = idempotentExecutor.run(() -> {
             alertRepository.saveAndFlush(alert);
             log.info(
                     "alert creation eventId={} vehicleId={} alertType={}",
@@ -47,6 +54,9 @@ public class AlertService {
                     violation.alertType()
             );
         }, "duplicate event detection eventId=" + event.eventId() + " alertType=" + violation.alertType());
+        if (created) {
+            alertStream.publish(AlertResponse.from(alert));
+        }
     }
 
     public AlertPageResponse findAlerts(

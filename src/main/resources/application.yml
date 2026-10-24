@@ -47,8 +47,10 @@ vehicle:
     speed-threshold: 120
     temperature-threshold: 100
   simulator:
-    enabled: false
-    count: 4
+    enabled: true
+    count: 0
+    interval-ms: 2000
+    initial-delay-ms: 1500
   security:
     user:
       username: ${APP_USER_USERNAME:user}

@@ -7,7 +7,14 @@ public class SimulatorProperties {
 
     private boolean enabled;
 
-    private int count = 4;
+    /**
+     * How many readings to publish. Zero or less keeps the live feed running.
+     */
+    private int count;
+
+    private long intervalMs = 2000;
+
+    private long initialDelayMs = 1500;
 
     public boolean isEnabled() {
         return enabled;
@@ -23,5 +30,21 @@ public class SimulatorProperties {
 
     public void setCount(int count) {
         this.count = count;
+    }
+
+    public long getIntervalMs() {
+        return intervalMs;
+    }
+
+    public void setIntervalMs(long intervalMs) {
+        this.intervalMs = intervalMs;
+    }
+
+    public long getInitialDelayMs() {
+        return initialDelayMs;
+    }
+
+    public void setInitialDelayMs(long initialDelayMs) {
+        this.initialDelayMs = initialDelayMs;
     }
 }
